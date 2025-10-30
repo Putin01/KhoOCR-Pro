@@ -1,12 +1,48 @@
-import requests
-import os
+from PIL import Image
+from io import BytesIO
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import torch
 
-HF_TOKEN = os.getenv("HF_TOKEN")
-API_URL = "https://api-inference.huggingface.co/models/deepseek-ai/DeepSeek-OCR"
+# Load model nhẹ, chạy trên CPU (Render Free)
+model = AutoModelForCausalLM.from_pretrained(
+    "openbmb/MiniCPM-V-2_6",
+    trust_remote_code=True,
+    torch_dtype=torch.float16,
+    device_map="cpu"
+)
+tokenizer = AutoTokenizer.from_pretrained(
+    "openbmb/MiniCPM-V-2_6",
+    trust_remote_code=True
+)
+model.eval()
 
-def ocr_with_deepseek(image_bytes):
-    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
-    response = requests.post(API_URL, headers=headers, data=image_bytes)
-    if response.status_code == 200:
-        return response.json()
-    return {"error": "OCR failed", "status": response.status_code}
+def ocr_with_minicpm(image_bytes: bytes) -> dict:
+    try:
+        # Mở ảnh
+        image = Image.open(BytesIO(image_bytes)).convert("RGB")
+        
+        # Prompt thông minh
+        msgs = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image"},
+                    {"type": "text", "text": "Extract all text from this Vietnamese invoice in structured JSON format."}
+                ]
+            }
+        ]
+        
+        # OCR
+        result = model.chat(
+            image=image,
+            msgs=msgs,
+            tokenizer=tokenizer,
+            sampling=True,
+            temperature=0.7,
+            max_new_tokens=512
+        )
+        
+        return {"structured_text": result}
+    
+    except Exception as e:
+        return {"error": str(e)}
